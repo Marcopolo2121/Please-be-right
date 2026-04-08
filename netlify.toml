@@ -1,3 +1,9 @@
 [build]
   functions = "netlify/functions"
   publish = "."
+
+[functions]
+  node_bundler = "esbuild"
+
+[functions."refresh"]
+  timeout = 30
