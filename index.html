@@ -416,8 +416,10 @@ async function silentRefresh(){
   try{
     const resp = await fetch('/.netlify/functions/refresh');
     if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const fresh = await resp.json();
-    if(fresh.error) throw new Error(fresh.error);
+    const result = await resp.json();
+    if(result.error) throw new Error(result.error);
+    const fresh = result.customers || {};
+    if(result.errors && result.errors.length) console.warn('Sheet errors:', result.errors);
     // Replace DB entries with fresh data from Smartsheet
     Object.entries(fresh).forEach(([name,row])=>{
       if(name&&name.trim()) DB[name]=row;
