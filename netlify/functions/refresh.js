@@ -19,76 +19,90 @@ const SHEET_IDS = [
 const HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Content-Type': 'application/json'
 };
 
 async function fetchSheet(sheetId, sheetName) {
-  const res = await fetch(
-    `https://api.smartsheet.com/2.0/sheets/${sheetId}?include=objectValue`,
-    { headers: { 'Authorization': `Bearer ${SMARTSHEET_TOKEN}`, 'Content-Type': 'application/json' } }
-  );
-  if (!res.ok) throw new Error(`Sheet ${sheetName}: HTTP ${res.status}`);
-  const data = await res.json();
-
-  const cols = {};
-  data.columns.forEach(c => { cols[c.id] = c.title; });
-
-  const customers = {};
-  (data.rows || []).forEach(row => {
-    const obj = { _sheet: sheetName };
-    row.cells.forEach(cell => {
-      const col = cols[cell.columnId];
-      if (!col) return;
-      // Handle MULTIPICKLIST — values are in objectValue.values array
-      if (cell.objectValue && cell.objectValue.objectType === 'MULTI_PICKLIST' && Array.isArray(cell.objectValue.values)) {
-        obj[col] = cell.objectValue.values.join(', ');
-      } else if (cell.displayValue != null) {
-        obj[col] = cell.displayValue;
-      } else if (cell.value != null) {
-        obj[col] = String(cell.value);
-      } else {
-        obj[col] = '';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(
+      `https://api.smartsheet.com/2.0/sheets/${sheetId}?include=objectValue`,
+      {
+        headers: { 'Authorization': `Bearer ${SMARTSHEET_TOKEN}` },
+        signal: controller.signal
       }
+    );
+    clearTimeout(timeout);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const cols = {};
+    data.columns.forEach(c => { cols[c.id] = c.title; });
+
+    const customers = {};
+    (data.rows || []).forEach(row => {
+      const obj = { _sheet: sheetName };
+      row.cells.forEach(cell => {
+        const col = cols[cell.columnId];
+        if (!col) return;
+        if (cell.objectValue && cell.objectValue.objectType === 'MULTI_PICKLIST' && Array.isArray(cell.objectValue.values)) {
+          obj[col] = cell.objectValue.values.join(', ');
+        } else if (cell.displayValue != null) {
+          obj[col] = cell.displayValue;
+        } else if (cell.value != null) {
+          obj[col] = String(cell.value);
+        } else {
+          obj[col] = '';
+        }
+      });
+      const name = obj['Oracle Customer Name'];
+      if (name && String(name).trim()) customers[String(name).trim()] = obj;
     });
-    const name = obj['Oracle Customer Name'];
-    if (name && String(name).trim()) customers[String(name).trim()] = obj;
-  });
-  return customers;
+    return { success: true, customers };
+  } catch (err) {
+    clearTimeout(timeout);
+    return { success: false, error: `${sheetName}: ${err.message}` };
+  }
 }
 
 exports.handler = async function(event, context) {
-  // Handle preflight OPTIONS request
+  // Handle preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: HEADERS, body: '' };
   }
 
-  try {
-    const results = await Promise.allSettled(
-      SHEET_IDS.map(s => fetchSheet(s.id, s.name))
-    );
+  // Allow longer execution time
+  context.callbackWaitsForEmptyEventLoop = false;
 
-    const allCustomers = {};
-    const errors = [];
-    results.forEach((r, i) => {
-      if (r.status === 'fulfilled') {
-        Object.assign(allCustomers, r.value);
+  const allCustomers = {};
+  const errors = [];
+
+  // Fetch in two batches of 6 to avoid timeout
+  const batch1 = SHEET_IDS.slice(0, 6);
+  const batch2 = SHEET_IDS.slice(6);
+
+  const results1 = await Promise.allSettled(batch1.map(s => fetchSheet(s.id, s.name)));
+  const results2 = await Promise.allSettled(batch2.map(s => fetchSheet(s.id, s.name)));
+
+  [...results1, ...results2].forEach(r => {
+    if (r.status === 'fulfilled') {
+      if (r.value.success) {
+        Object.assign(allCustomers, r.value.customers);
       } else {
-        errors.push(`${SHEET_IDS[i].name}: ${r.reason.message}`);
-        console.error(`Failed: ${SHEET_IDS[i].name}:`, r.reason.message);
+        errors.push(r.value.error);
       }
-    });
+    }
+  });
 
-    return {
-      statusCode: 200,
-      headers: HEADERS,
-      body: JSON.stringify({ customers: allCustomers, errors })
-    };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      headers: HEADERS,
-      body: JSON.stringify({ error: err.message })
-    };
-  }
+  return {
+    statusCode: 200,
+    headers: HEADERS,
+    body: JSON.stringify({
+      customers: allCustomers,
+      count: Object.keys(allCustomers).length,
+      errors
+    })
+  };
 };
