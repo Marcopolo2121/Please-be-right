@@ -404,10 +404,10 @@ const SHEET_IDS=[
 const REFRESH_INTERVAL=30;
 let refreshSecs=REFRESH_INTERVAL;
 
+// Single interval — ticks every second, refreshes every 30 seconds
 setInterval(()=>{
   refreshSecs--;
-  const m=Math.floor(refreshSecs/60), s=refreshSecs%60;
-  hintEl.textContent=`All data pre-loaded — instant search. Next refresh in ${m}:${String(s).padStart(2,'0')}.`;
+  hintEl.textContent=`All data pre-loaded — instant search. Next refresh in ${refreshSecs}s.`;
   if(refreshSecs<=0){ refreshSecs=REFRESH_INTERVAL; silentRefresh(); }
 },1000);
 
