@@ -418,17 +418,16 @@ async function silentRefresh(){
     if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const fresh = await resp.json();
     if(fresh.error) throw new Error(fresh.error);
-    let changes=0;
+    // Replace DB entries with fresh data from Smartsheet
     Object.entries(fresh).forEach(([name,row])=>{
-      if(!name||!name.trim()) return;
-      if(!DB[name]||JSON.stringify(DB[name])!==JSON.stringify(row)) changes++;
-      DB[name]=row;
+      if(name&&name.trim()) DB[name]=row;
     });
     rebuildCustomers();
+    // Always re-render current profile so live data shows immediately
     const cur=searchInput.value.trim();
-    if(cur&&DB[cur]&&changes>0) renderProfile(cur);
+    if(cur&&DB[cur]) renderProfile(cur);
     const now=new Date();
-    hintEl.textContent=`All data pre-loaded — instant search. Last refreshed: ${now.toLocaleTimeString('en-GB')}${changes?' · '+changes+' update'+(changes>1?'s':''):' · no changes'}. Next in 0:30.`;
+    hintEl.textContent=`Live data — last refreshed: ${now.toLocaleTimeString('en-GB')}. Next in 0:30.`;
   }catch(e){
     hintEl.textContent=`All data pre-loaded — instant search. Refresh failed: ${e.message}. Retrying in 0:30.`;
   }
