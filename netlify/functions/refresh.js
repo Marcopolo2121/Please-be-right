@@ -1,3 +1,4 @@
+
 const SMARTSHEET_TOKEN = 'x2VvlV15490ku07kfb398KAXzBOBxSfkTrkGs';
 
 const SHEET_IDS = [
@@ -15,10 +16,17 @@ const SHEET_IDS = [
   { id: '8795723429898116', name: 'UK' }
 ];
 
+const HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Content-Type': 'application/json'
+};
+
 async function fetchSheet(sheetId, sheetName) {
   const res = await fetch(
     `https://api.smartsheet.com/2.0/sheets/${sheetId}?include=objectValue`,
-    { headers: { 'Authorization': `Bearer ${SMARTSHEET_TOKEN}` } }
+    { headers: { 'Authorization': `Bearer ${SMARTSHEET_TOKEN}`, 'Content-Type': 'application/json' } }
   );
   if (!res.ok) throw new Error(`Sheet ${sheetName}: HTTP ${res.status}`);
   const data = await res.json();
@@ -26,19 +34,19 @@ async function fetchSheet(sheetId, sheetName) {
   const cols = {};
   data.columns.forEach(c => { cols[c.id] = c.title; });
 
-      const customers = {};
+  const customers = {};
   (data.rows || []).forEach(row => {
     const obj = { _sheet: sheetName };
     row.cells.forEach(cell => {
       const col = cols[cell.columnId];
       if (!col) return;
-      // MULTIPICKLIST values come back in objectValue.values array
+      // Handle MULTIPICKLIST — values are in objectValue.values array
       if (cell.objectValue && cell.objectValue.objectType === 'MULTI_PICKLIST' && Array.isArray(cell.objectValue.values)) {
         obj[col] = cell.objectValue.values.join(', ');
       } else if (cell.displayValue != null) {
         obj[col] = cell.displayValue;
       } else if (cell.value != null) {
-        obj[col] = cell.value;
+        obj[col] = String(cell.value);
       } else {
         obj[col] = '';
       }
@@ -50,11 +58,10 @@ async function fetchSheet(sheetId, sheetName) {
 }
 
 exports.handler = async function(event, context) {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
+  // Handle preflight OPTIONS request
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers: HEADERS, body: '' };
+  }
 
   try {
     const results = await Promise.allSettled(
@@ -62,23 +69,25 @@ exports.handler = async function(event, context) {
     );
 
     const allCustomers = {};
+    const errors = [];
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
         Object.assign(allCustomers, r.value);
       } else {
+        errors.push(`${SHEET_IDS[i].name}: ${r.reason.message}`);
         console.error(`Failed: ${SHEET_IDS[i].name}:`, r.reason.message);
       }
     });
 
     return {
       statusCode: 200,
-      headers,
-      body: JSON.stringify(allCustomers)
+      headers: HEADERS,
+      body: JSON.stringify({ customers: allCustomers, errors })
     };
   } catch (err) {
     return {
       statusCode: 500,
-      headers,
+      headers: HEADERS,
       body: JSON.stringify({ error: err.message })
     };
   }
