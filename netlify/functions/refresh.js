@@ -26,12 +26,22 @@ async function fetchSheet(sheetId, sheetName) {
   const cols = {};
   data.columns.forEach(c => { cols[c.id] = c.title; });
 
-  const customers = {};
+      const customers = {};
   (data.rows || []).forEach(row => {
     const obj = { _sheet: sheetName };
     row.cells.forEach(cell => {
       const col = cols[cell.columnId];
-      if (col) obj[col] = cell.displayValue != null ? cell.displayValue : (cell.value != null ? cell.value : '');
+      if (!col) return;
+      // MULTIPICKLIST values come back in objectValue.values array
+      if (cell.objectValue && cell.objectValue.objectType === 'MULTI_PICKLIST' && Array.isArray(cell.objectValue.values)) {
+        obj[col] = cell.objectValue.values.join(', ');
+      } else if (cell.displayValue != null) {
+        obj[col] = cell.displayValue;
+      } else if (cell.value != null) {
+        obj[col] = cell.value;
+      } else {
+        obj[col] = '';
+      }
     });
     const name = obj['Oracle Customer Name'];
     if (name && String(name).trim()) customers[String(name).trim()] = obj;
